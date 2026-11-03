@@ -8,10 +8,17 @@
 #include "wbc_mdp_registrations.h"
 #include "wbc_tracking_params.h"
 #include "isaaclab/algorithms/algorithms.h"
+#include "policy_io_recorder.h"
 
 #include <spdlog/spdlog.h>
 
+#include <cstdlib>
 #include <unordered_map>
+
+namespace {
+// Recording of the network input and output. Enabled by the POLICY_IO_DIR environment variable (output directory).
+pio::PolicyIoTap g_policy_io;
+}  // namespace
 
 std::shared_ptr<WbcMotionLoader> State_WbcTracking::motion = nullptr;
 
@@ -244,6 +251,12 @@ void State_WbcTracking::enter()
     was_playback_finished_ = false;
   }
   env->reset();
+  if (g_policy_io.start(std::getenv("POLICY_IO_DIR"))) {
+    env->step_io_hook = [this](const std::unordered_map<std::string, std::vector<float>>& obs,
+                               const std::vector<float>& act) {
+      g_policy_io.tap(motion ? motion->frame : -1, clip_library_->currentName().c_str(), obs, act);
+    };
+  }
   policy_thread_running = true;
   policy_thread = std::thread([this] {
     using clock = std::chrono::high_resolution_clock;
