@@ -131,3 +131,19 @@ wbc_g1_deploy/
 | [wbc-mjlab/wbc-mjlab](https://github.com/wbc-mjlab/wbc-mjlab) | Train policies; export `policy.onnx` + `config.yaml` |
 | [wbc-mjlab/wbc-g1-deploy](https://github.com/wbc-mjlab/wbc-g1-deploy) | This repo — G1 ONNX runtime |
 | [mujocolab/mjlab](https://github.com/mujocolab/mjlab) | Simulation / training stack |
+
+## Policy I/O recording (optional)
+
+Records the policy input (observation), the policy output and the motion frame
+index at every 50 Hz policy step, straight from the control loop. Off by default;
+no new dependencies.
+
+```bash
+mkdir -p /tmp/policy_io
+POLICY_IO_DIR=/tmp/policy_io ./wbc_g1_ctrl --network=eth0
+```
+
+Without `POLICY_IO_DIR` nothing is recorded. Writing happens on a separate thread
+from a bounded buffer: the control loop never waits, and if the buffer overflows
+the dropped steps are counted, not blocked on. Read the recording with
+`python3 tools/read_policy_io.py /tmp/policy_io/policy_io.bin` (needs only numpy).

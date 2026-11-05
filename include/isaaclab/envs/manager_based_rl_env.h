@@ -9,7 +9,11 @@
 #include "isaaclab/manager/action_manager.h"
 #include "isaaclab/assets/articulation/articulation.h"
 #include "isaaclab/algorithms/algorithms.h"
+#include <functional>
 #include <iostream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 #include "isaaclab/utils/utils.h"
 
 namespace isaaclab
@@ -62,8 +66,13 @@ public:
         robot->update();
         auto obs = observation_manager->compute();
         auto action = alg->act(obs);
+        if (step_io_hook) step_io_hook(obs, action);  // record network input and output; empty if disabled
         action_manager->process_action(action);
     }
+
+    // Recording hook: receives the network input and output at every step. If unset, nothing happens.
+    std::function<void(const std::unordered_map<std::string, std::vector<float>>&,
+                       const std::vector<float>&)> step_io_hook;
 
     float step_dt;
     
