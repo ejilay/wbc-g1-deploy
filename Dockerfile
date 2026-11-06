@@ -93,8 +93,9 @@ ENV LD_LIBRARY_PATH=/app/lib
 ENV POLICY_IO_DIR=/app/config/policy_io
 WORKDIR /app
 
-# Smoke test: the binary starts and every shared library resolves.
-RUN /app/bin/wbc_g1_ctrl --help
+# Smoke test: the binary starts and every shared library resolves. The exit code is not checked:
+# upstream aborts on exit after --help (the Keyboard reader thread is never joined).
+RUN /app/bin/wbc_g1_ctrl --help 2>&1 | grep -q -- "--network"
 
 ENTRYPOINT ["/app/bin/wbc_g1_ctrl"]
 CMD []
