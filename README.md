@@ -50,12 +50,15 @@ Builds everything (toolchain, `unitree_sdk2`, ONNX Runtime, controller) into one
 
 ```bash
 docker build -t wbc-g1-deploy .
-docker run --rm wbc-g1-deploy                        # prints --help
-docker run --rm --network host wbc-g1-deploy \
-    build/wbc_g1_ctrl --network=eth0                 # run against a robot
+docker run --rm wbc-g1-deploy --help
+docker run --rm --name wbc_g1_ctrl --network host --privileged \
+    -v <cfg>:/app/config wbc-g1-deploy --network eth0   # run against a robot
 ```
 
-DDS needs the host network stack, so use `--network host` when talking to the robot.
+The entrypoint is `/app/bin/wbc_g1_ctrl`; it reads its config from `/app/config` (the repo
+`config/` is baked in, mount a directory over it to use another one). DDS needs the host network
+stack, so use `--network host` when talking to the robot. The image builds natively on x86_64 and
+aarch64.
 
 ### Pixi
 
@@ -167,11 +170,12 @@ index at every 50 Hz policy step, straight from the control loop. Off by default
 no new dependencies.
 
 ```bash
-mkdir -p /tmp/policy_io
 POLICY_IO_DIR=/tmp/policy_io ./wbc_g1_ctrl --network=eth0
 ```
 
-Without `POLICY_IO_DIR` nothing is recorded. Writing happens on a separate thread
-from a bounded buffer: the control loop never waits, and if the buffer overflows
-the dropped steps are counted, not blocked on. Read the recording with
-`python3 tools/read_policy_io.py /tmp/policy_io/policy_io.bin` (needs only numpy).
+Without `POLICY_IO_DIR` nothing is recorded (the Docker image sets
+`POLICY_IO_DIR=/app/config/policy_io`; pass `-e POLICY_IO_DIR=` to turn it off). Every launch
+writes to a new directory, `<POLICY_IO_DIR>/<UTC launch time>/<state>/policy_io.bin`, so a restart
+never overwrites the previous run. Writing happens on a separate thread from a bounded buffer: the
+control loop never waits, and if the buffer overflows the dropped steps are counted, not blocked
+on. Read a recording with `python3 tools/read_policy_io.py <dir>/policy_io.bin` (needs only numpy).

@@ -13,11 +13,68 @@
 #include <spdlog/spdlog.h>
 
 #include <cstdlib>
+#include <ctime>
+#include <filesystem>
+#include <system_error>
 #include <unordered_map>
 
 namespace {
-// Recording of the network input and output. Enabled by the POLICY_IO_DIR environment variable (output directory).
-pio::PolicyIoTap g_policy_io;
+// Recording of the network input and output, enabled by the POLICY_IO_DIR environment variable.
+// Layout: <POLICY_IO_DIR>/<UTC launch time>/<state name>/policy_io.bin. A new launch gets a new
+// directory, so restarting the controller (e.g. a fresh `docker run --rm`) never overwrites the
+// previous run, and every tracking state writes its own file.
+
+// One directory per controller process; empty if recording is off or the directory cannot be made.
+const std::string& policy_io_session_dir()
+{
+  static const std::string dir = [] {
+    const char* base = std::getenv("POLICY_IO_DIR");
+    if (base == nullptr || base[0] == '\0') return std::string();
+    char stamp[32];
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+    gmtime_r(&now, &utc);
+    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &utc);
+    std::filesystem::path path = std::filesystem::path(base) / stamp;
+    std::error_code ec;
+    for (int i = 1; std::filesystem::exists(path, ec); ++i) {
+      path = std::filesystem::path(base) / (std::string(stamp) + "-" + std::to_string(i));
+    }
+    if (!std::filesystem::create_directories(path, ec) || ec) {
+      spdlog::error("policy_io: cannot create {}: {}; recording is off", path.string(), ec.message());
+      return std::string();
+    }
+    return path.string();
+  }();
+  return dir;
+}
+
+// Recording directory for one state, created on first use; empty if recording is off.
+std::string policy_io_state_dir(std::string state)
+{
+  const std::string& session = policy_io_session_dir();
+  if (session.empty()) return std::string();
+  for (char& c : state) {
+    if (c == '/') c = '_';
+  }
+  const std::filesystem::path path = std::filesystem::path(session) / state;
+  std::error_code ec;
+  std::filesystem::create_directories(path, ec);
+  if (ec) {
+    spdlog::error("policy_io: cannot create {}: {}; recording is off", path.string(), ec.message());
+    return std::string();
+  }
+  return path.string();
+}
+
+// One recorder per tracking state, alive for the whole process (the policy thread holds a reference).
+pio::PolicyIoTap& policy_io_tap(const std::string& state)
+{
+  static std::unordered_map<std::string, std::unique_ptr<pio::PolicyIoTap>> taps;
+  auto& tap = taps[state];
+  if (!tap) tap = std::make_unique<pio::PolicyIoTap>();
+  return *tap;
+}
 }  // namespace
 
 std::shared_ptr<WbcMotionLoader> State_WbcTracking::motion = nullptr;
@@ -251,11 +308,17 @@ void State_WbcTracking::enter()
     was_playback_finished_ = false;
   }
   env->reset();
-  if (g_policy_io.start(std::getenv("POLICY_IO_DIR"))) {
-    env->step_io_hook = [this](const std::unordered_map<std::string, std::vector<float>>& obs,
-                               const std::vector<float>& act) {
-      g_policy_io.tap(motion ? motion->frame : -1, clip_library_->currentName().c_str(), obs, act);
-    };
+  {
+    // start() succeeds once per state; on re-entry the hook set the first time keeps recording.
+    pio::PolicyIoTap& tap = policy_io_tap(getStateString());
+    const std::string dir = tap.enabled() ? std::string() : policy_io_state_dir(getStateString());
+    if (tap.start(dir.c_str())) {
+      spdlog::info("policy_io: recording to {}/policy_io.bin", dir);
+      env->step_io_hook = [this, &tap](const std::unordered_map<std::string, std::vector<float>>& obs,
+                                       const std::vector<float>& act) {
+        tap.tap(motion ? motion->frame : -1, clip_library_->currentName().c_str(), obs, act);
+      };
+    }
   }
   policy_thread_running = true;
   policy_thread = std::thread([this] {

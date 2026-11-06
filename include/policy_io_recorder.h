@@ -203,6 +203,7 @@ class PolicyIoTap {
     enabled_ = false;
   }
 
+  bool enabled() const { return enabled_; }
   uint64_t bad_shape() const { return bad_shape_.load(std::memory_order_relaxed); }
   const PolicyIoRecorder& recorder() const { return rec_; }
 
